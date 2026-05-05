@@ -1,96 +1,96 @@
-"""Convenience builder that wires loaders directly into an EnvChain."""
+"""Fluent builder for constructing and exporting EnvChain instances."""
 
-from pathlib import Path
-from typing import Optional
+from typing import Dict, Optional
 
-from .chain import EnvChain
-from .loader import load_from_dotenv, load_from_env, load_from_json_file
+from envchain.chain import EnvChain
+from envchain.loader import load_from_dotenv, load_from_env, load_from_json_file
+from envchain.exporter import (
+    export_to_dict,
+    export_to_dotenv,
+    export_to_dotenv_file,
+    export_to_env,
+    export_to_json,
+    export_to_json_file,
+)
 
 
 class EnvChainBuilder:
-    """Fluent builder for constructing an :class:`EnvChain` from multiple sources.
+    """Fluent builder that layers env sources and resolves them.
 
     Example::
 
         chain = (
             EnvChainBuilder()
-            .add_dotenv(".env")
-            .add_dotenv(".env.production")
-            .add_env(prefix="APP_")
+            .add_dotenv('.env')
+            .add_dotenv('.env.production')
+            .add_env(prefix='APP_')
             .build()
         )
-        value = chain.get("DATABASE_URL")
     """
 
     def __init__(self) -> None:
         self._chain = EnvChain()
 
-    def add_env(self, prefix: Optional[str] = None, name: Optional[str] = None) -> "EnvChainBuilder":
-        """Add a layer sourced from the current process environment.
+    # ------------------------------------------------------------------
+    # Layer helpers
+    # ------------------------------------------------------------------
 
-        Args:
-            prefix: Optional prefix to filter and strip from variable names.
-            name: Optional label for this layer (for debugging).
-
-        Returns:
-            self, for chaining.
-        """
-        layer = load_from_env(prefix=prefix)
-        self._chain.add_layer(layer, name=name or f"env(prefix={prefix!r})")
+    def add_env(self, prefix: Optional[str] = None) -> "EnvChainBuilder":
+        """Add current process environment as a layer."""
+        self._chain.add_layer(load_from_env(prefix=prefix))
         return self
 
-    def add_dotenv(
-        self,
-        path: str | Path,
-        *,
-        missing_ok: bool = False,
-        name: Optional[str] = None,
-    ) -> "EnvChainBuilder":
-        """Add a layer sourced from a .env file.
-
-        Args:
-            path: Path to the .env file.
-            missing_ok: If True, silently skip missing files instead of raising.
-            name: Optional label for this layer.
-
-        Returns:
-            self, for chaining.
-        """
+    def add_dotenv(self, path: str) -> "EnvChainBuilder":
+        """Add a .env file as a layer (missing files are silently skipped)."""
         try:
-            layer = load_from_dotenv(path)
+            self._chain.add_layer(load_from_dotenv(path))
         except FileNotFoundError:
-            if missing_ok:
-                return self
-            raise
-        self._chain.add_layer(layer, name=name or str(path))
+            pass
         return self
 
-    def add_json(
-        self,
-        path: str | Path,
-        *,
-        missing_ok: bool = False,
-        name: Optional[str] = None,
-    ) -> "EnvChainBuilder":
-        """Add a layer sourced from a JSON file.
-
-        Args:
-            path: Path to the JSON file.
-            missing_ok: If True, silently skip missing files instead of raising.
-            name: Optional label for this layer.
-
-        Returns:
-            self, for chaining.
-        """
+    def add_json(self, path: str) -> "EnvChainBuilder":
+        """Add a JSON file as a layer (missing files are silently skipped)."""
         try:
-            layer = load_from_json_file(path)
+            self._chain.add_layer(load_from_json_file(path))
         except FileNotFoundError:
-            if missing_ok:
-                return self
-            raise
-        self._chain.add_layer(layer, name=name or str(path))
+            pass
         return self
+
+    def add_dict(self, data: Dict[str, str]) -> "EnvChainBuilder":
+        """Add an explicit dict as a layer."""
+        self._chain.add_layer(data)
+        return self
+
+    # ------------------------------------------------------------------
+    # Terminal operations
+    # ------------------------------------------------------------------
 
     def build(self) -> EnvChain:
-        """Return the fully configured :class:`EnvChain`."""
+        """Return the underlying :class:`EnvChain` instance."""
         return self._chain
+
+    def resolve(self) -> Dict[str, str]:
+        """Resolve all layers and return the merged dict."""
+        return self._chain.resolve()
+
+    # ------------------------------------------------------------------
+    # Export shortcuts
+    # ------------------------------------------------------------------
+
+    def to_dict(self) -> Dict[str, str]:
+        return export_to_dict(self.resolve())
+
+    def to_json(self, indent: int = 2) -> str:
+        return export_to_json(self.resolve(), indent=indent)
+
+    def to_dotenv(self) -> str:
+        return export_to_dotenv(self.resolve())
+
+    def to_env(self, prefix: Optional[str] = None) -> None:
+        export_to_env(self.resolve(), prefix=prefix)
+
+    def to_json_file(self, path: str, indent: int = 2) -> None:
+        export_to_json_file(self.resolve(), path, indent=indent)
+
+    def to_dotenv_file(self, path: str) -> None:
+        export_to_dotenv_file(self.resolve(), path)
