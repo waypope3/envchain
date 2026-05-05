@@ -39,6 +39,12 @@ You can also export the resolved environment to a flat `.env` file:
 chain.export(".env.resolved")
 ```
 
+To inspect which stage a variable was resolved from, use `chain.source()`:
+
+```python
+chain.source("DATABASE_URL")  # returns ".env.staging"
+```
+
 **Stage resolution order:** later stages take priority over earlier ones, allowing local overrides without modifying shared configs.
 
 ### CLI
