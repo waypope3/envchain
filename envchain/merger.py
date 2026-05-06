@@ -69,7 +69,22 @@ def apply_merge(
     layers: list,
     strategy: str = "replace",
 ) -> Dict[str, Any]:
-    """Apply a named merge strategy across a list of dicts."""
+    """Apply a named merge strategy across a list of dicts.
+
+    Args:
+        layers: A list of dicts representing environment variable layers,
+                applied in order from first (lowest priority) to last.
+        strategy: The name of the merge strategy to use. Defaults to 'replace'.
+
+    Returns:
+        A single merged dict containing the combined environment variables.
+
+    Raises:
+        MergeError: If the strategy name is unknown, or if 'strict' strategy
+                    encounters a duplicate key.
+    """
+    if not layers:
+        return {}
     fn = get_strategy(strategy)
     result: Dict[str, Any] = {}
     for layer in layers:
