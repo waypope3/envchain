@@ -1,5 +1,5 @@
-"""Builder module for constructing EnvChain instances fluently."""
-
+"""Fluent builder for constructing EnvChain instances."""
+import os
 from envchain.chain import EnvChain
 from envchain.loader import load_from_env, load_from_json_file, load_from_dotenv
 from envchain.exporter import (
@@ -9,54 +9,47 @@ from envchain.exporter import (
     export_to_env,
     export_to_json_file,
 )
-from envchain.snapshot import create_snapshot, restore_snapshot
+from envchain.scoper import scope_env, unscope_env
 
 
 class EnvChainBuilder:
-    """Fluent builder for assembling layered env chains."""
-
     def __init__(self):
         self._chain = EnvChain()
-        self._snapshots: dict = {}
 
-    def add_env(self, prefix: str = "") -> "EnvChainBuilder":
-        """Add a layer loaded from OS environment variables."""
-        self._chain.add_layer(load_from_env(prefix=prefix))
+    def add_env(self, prefix: str = "", strip_prefix: bool = True) -> "EnvChainBuilder":
+        data = load_from_env(prefix=prefix, strip_prefix=strip_prefix)
+        self._chain.add_layer(data)
         return self
 
     def add_dotenv(self, path: str) -> "EnvChainBuilder":
-        """Add a layer loaded from a .env file."""
-        self._chain.add_layer(load_from_dotenv(path))
+        data = load_from_dotenv(path)
+        self._chain.add_layer(data)
         return self
 
     def add_json(self, path: str) -> "EnvChainBuilder":
-        """Add a layer loaded from a JSON file."""
-        self._chain.add_layer(load_from_json_file(path))
+        data = load_from_json_file(path)
+        self._chain.add_layer(data)
         return self
 
     def add_dict(self, data: dict) -> "EnvChainBuilder":
-        """Add a layer from a plain dict."""
-        self._chain.add_layer(data)
+        self._chain.add_layer(dict(data))
         return self
 
-    def snapshot(self, label: str = "") -> "EnvChainBuilder":
-        """Save the current resolved state as a named snapshot."""
-        key = label or f"_snap_{len(self._snapshots)}"
-        self._snapshots[key] = create_snapshot(self._chain.resolve(), label=label)
+    def add_scoped(self, data: dict, scope: str) -> "EnvChainBuilder":
+        """Add a dict whose keys will be prefixed with the given scope."""
+        self._chain.add_layer(scope_env(data, scope))
         return self
 
-    def restore(self, label: str) -> "EnvChainBuilder":
-        """Replace current chain with a previously saved snapshot."""
-        if label not in self._snapshots:
-            raise KeyError(f"No snapshot found with label '{label}'.")
-        data = restore_snapshot(self._snapshots[label])
-        self._chain = EnvChain()
-        self._chain.add_layer(data)
-        return self
+    def resolve_scope(self, scope: str) -> dict:
+        """Resolve the chain and return only keys matching the given scope (stripped)."""
+        resolved = self._chain.resolve()
+        return unscope_env(resolved, scope)
 
     def build(self) -> EnvChain:
-        """Return the assembled EnvChain."""
         return self._chain
+
+    def resolve(self) -> dict:
+        return self._chain.resolve()
 
     # --- export shortcuts ---
 
@@ -74,6 +67,3 @@ class EnvChainBuilder:
 
     def to_json_file(self, path: str, indent: int = 2) -> None:
         export_to_json_file(self._chain.resolve(), path, indent=indent)
-
-    def get(self, key: str, default=None):
-        return self._chain.get(key, default)
