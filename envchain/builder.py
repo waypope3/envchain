@@ -1,82 +1,79 @@
-"""envchain.builder — Fluent builder for constructing layered EnvChain instances."""
+"""EnvChainBuilder: fluent builder for constructing and exporting env chains."""
 
-from __future__ import annotations
-
-import os
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 from envchain.chain import EnvChain
+from envchain.loader import load_from_env, load_from_dotenv, load_from_json_file
 from envchain.exporter import (
     export_to_dict,
-    export_to_dotenv,
     export_to_json,
+    export_to_dotenv,
+    export_to_env,
     export_to_json_file,
 )
-from envchain.freezer import FrozenEnv, freeze
-from envchain.loader import load_from_dotenv, load_from_env, load_from_json_file
 from envchain.scoper import scope_env
+from envchain.pipeline import EnvPipeline
 
 
 class EnvChainBuilder:
-    """Fluent builder that accumulates layers and produces an EnvChain."""
+    """Fluent builder for layered env resolution with optional pipeline processing."""
 
-    def __init__(self) -> None:
-        self._chain: EnvChain = EnvChain()
+    def __init__(self):
+        self._chain = EnvChain()
+        self._pipeline: Optional[EnvPipeline] = None
 
-    # ------------------------------------------------------------------
-    # Layer sources
-    # ------------------------------------------------------------------
-
-    def add_env(self, prefix: Optional[str] = None) -> "EnvChainBuilder":
-        """Add a layer sourced from the current process environment."""
+    def add_env(self, prefix: str = "") -> "EnvChainBuilder":
+        """Add a layer loaded from the current process environment."""
         self._chain.add_layer(load_from_env(prefix=prefix))
         return self
 
-    def add_dotenv(self, path: str, prefix: Optional[str] = None) -> "EnvChainBuilder":
-        """Add a layer sourced from a .env file."""
+    def add_dotenv(self, path: str, prefix: str = "") -> "EnvChainBuilder":
+        """Add a layer loaded from a .env file."""
         self._chain.add_layer(load_from_dotenv(path, prefix=prefix))
         return self
 
-    def add_json(self, path: str) -> "EnvChainBuilder":
-        """Add a layer sourced from a JSON file."""
-        self._chain.add_layer(load_from_json_file(path))
+    def add_json(self, path: str, prefix: str = "") -> "EnvChainBuilder":
+        """Add a layer loaded from a JSON file."""
+        self._chain.add_layer(load_from_json_file(path, prefix=prefix))
         return self
 
     def add_dict(self, data: Dict[str, Any]) -> "EnvChainBuilder":
-        """Add a layer from a plain dictionary."""
+        """Add a layer from a plain dict."""
         self._chain.add_layer(dict(data))
         return self
 
-    def add_scoped(
-        self, data: Dict[str, Any], scope: str
-    ) -> "EnvChainBuilder":
-        """Add a layer whose keys are prefixed with *scope*."""
+    def add_scoped(self, scope: str, data: Dict[str, Any]) -> "EnvChainBuilder":
+        """Add a layer with all keys prefixed by the given scope."""
         self._chain.add_layer(scope_env(data, scope))
         return self
 
-    # ------------------------------------------------------------------
-    # Export shortcuts
-    # ------------------------------------------------------------------
+    def set_pipeline(self, pipeline: EnvPipeline) -> "EnvChainBuilder":
+        """Attach a processing pipeline applied during resolution."""
+        self._pipeline = pipeline
+        return self
 
-    def build(self) -> EnvChain:
-        """Return the underlying EnvChain."""
-        return self._chain
-
-    def to_dict(self) -> Dict[str, Any]:
-        return export_to_dict(self._chain.resolve())
-
-    def to_json(self, indent: int = 2) -> str:
-        return export_to_json(self._chain.resolve(), indent=indent)
-
-    def to_dotenv(self) -> str:
-        return export_to_dotenv(self._chain.resolve())
-
-    def to_json_file(self, path: str, indent: int = 2) -> None:
-        export_to_json_file(self._chain.resolve(), path, indent=indent)
-
-    def to_frozen(self) -> FrozenEnv:
-        """Return the resolved environment as an immutable FrozenEnv."""
-        return freeze(self._chain.resolve())
+    def build(self) -> Dict[str, Any]:
+        """Resolve all layers and run through the pipeline if set."""
+        resolved = self._chain.resolve()
+        if self._pipeline is not None:
+            resolved = self._pipeline.run(resolved)
+        return resolved
 
     def get(self, key: str, default: Any = None) -> Any:
-        return self._chain.get(key, default)
+        """Resolve and return a single key."""
+        return self.build().get(key, default)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return export_to_dict(self.build())
+
+    def to_json(self, indent: int = 2) -> str:
+        return export_to_json(self.build(), indent=indent)
+
+    def to_dotenv(self) -> str:
+        return export_to_dotenv(self.build())
+
+    def to_env(self) -> None:
+        export_to_env(self.build())
+
+    def to_json_file(self, path: str, indent: int = 2) -> None:
+        export_to_json_file(self.build(), path, indent=indent)
