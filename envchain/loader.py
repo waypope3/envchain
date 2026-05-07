@@ -47,7 +47,10 @@ def load_from_json_file(path: str | Path) -> Dict[str, str]:
         raise FileNotFoundError(f"Env file not found: {path}")
 
     with path.open("r", encoding="utf-8") as fh:
-        data = json.load(fh)
+        try:
+            data = json.load(fh)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"Invalid JSON in {path}: {exc}") from exc
 
     if not isinstance(data, dict):
         raise ValueError(f"Expected a JSON object in {path}, got {type(data).__name__}")
