@@ -1,99 +1,96 @@
-"""EnvChainBuilder: fluent interface for assembling and exporting env chains."""
+"""EnvChainBuilder: fluent builder for constructing layered env chains."""
 
-from typing import Any, Dict, Optional
+from __future__ import annotations
+
+import json
+from typing import Any
 
 from envchain.chain import EnvChain
-from envchain.loader import load_from_env, load_from_json_file, load_from_dotenv
+from envchain.loader import load_from_dotenv, load_from_env, load_from_json_file
 from envchain.exporter import (
     export_to_dict,
-    export_to_json,
     export_to_dotenv,
-    export_to_env,
+    export_to_json,
     export_to_json_file,
 )
 from envchain.scoper import scope_env
-from envchain.aliaser import apply_aliases
+from envchain.trimmer import trim_env
 
 
 class EnvChainBuilder:
-    """Fluent builder for constructing an EnvChain from multiple sources."""
+    """Fluent builder that accumulates layers into an EnvChain."""
 
     def __init__(self) -> None:
-        self._chain = EnvChain()
+        self._chain: EnvChain = EnvChain()
 
     # ------------------------------------------------------------------
-    # Layer addition
+    # Layer sources
     # ------------------------------------------------------------------
 
-    def add_layer(self, data: Dict[str, Any]) -> "EnvChainBuilder":
+    def add_layer(self, data: dict[str, str]) -> "EnvChainBuilder":
         """Add a plain dict as a layer."""
         self._chain.add_layer(data)
         return self
 
-    def add_env(self, prefix: Optional[str] = None) -> "EnvChainBuilder":
+    def add_env(self, prefix: str = "") -> "EnvChainBuilder":
         """Add current process environment (optionally filtered by prefix)."""
         self._chain.add_layer(load_from_env(prefix=prefix))
         return self
 
-    def add_dotenv(
-        self, path: str, prefix: Optional[str] = None
-    ) -> "EnvChainBuilder":
-        """Add variables from a .env file."""
-        self._chain.add_layer(load_from_dotenv(path, prefix=prefix))
+    def add_dotenv(self, path: str) -> "EnvChainBuilder":
+        """Add a .env file as a layer."""
+        self._chain.add_layer(load_from_dotenv(path))
         return self
 
-    def add_json(
-        self, path: str, prefix: Optional[str] = None
-    ) -> "EnvChainBuilder":
-        """Add variables from a JSON file."""
-        self._chain.add_layer(load_from_json_file(path, prefix=prefix))
+    def add_json_file(self, path: str) -> "EnvChainBuilder":
+        """Add a JSON file as a layer."""
+        self._chain.add_layer(load_from_json_file(path))
         return self
 
-    def add_scoped(
-        self, data: Dict[str, Any], scope: str
-    ) -> "EnvChainBuilder":
-        """Add a dict as a layer, prefixing all keys with *scope*."""
+    def add_scoped(self, scope: str, data: dict[str, str]) -> "EnvChainBuilder":
+        """Add a dict as a layer with keys prefixed by *scope*."""
         self._chain.add_layer(scope_env(data, scope))
         return self
 
-    def add_aliased(
-        self,
-        data: Dict[str, Any],
-        aliases: Dict[str, str],
-        *,
-        keep_original: bool = True,
-        missing_ok: bool = False,
-    ) -> "EnvChainBuilder":
-        """Add a dict layer after applying key aliases."""
-        aliased = apply_aliases(
-            data, aliases, keep_original=keep_original, missing_ok=missing_ok
-        )
-        self._chain.add_layer(aliased)
+    def add_trimmed(self, data: dict[str, str], *, normalize_keys: bool = False) -> "EnvChainBuilder":
+        """Add a layer after trimming all keys and values."""
+        self._chain.add_layer(trim_env(data, normalize_keys=normalize_keys))
         return self
 
     # ------------------------------------------------------------------
     # Build
     # ------------------------------------------------------------------
 
-    def build(self) -> EnvChain:
-        """Return the underlying EnvChain instance."""
-        return self._chain
+    def build(self) -> dict[str, str]:
+        """Resolve all layers and return the merged dict."""
+        return self._chain.resolve()
 
     # ------------------------------------------------------------------
     # Export shortcuts
     # ------------------------------------------------------------------
 
-    def to_dict(self) -> Dict[str, Any]:
-        return export_to_dict(self._chain.resolve())
+    def to_dict(self) -> dict[str, str]:
+        return export_to_dict(self.build())
 
-    def to_json(self, indent: int = 2) -> str:
-        return export_to_json(self._chain.resolve(), indent=indent)
+    def to_json(self, *, indent: int = 2) -> str:
+        return export_to_json(self.build(), indent=indent)
 
     def to_dotenv(self) -> str:
-        return export_to_dotenv(self._chain.resolve())
+        return export_to_dotenv(self.build())
+
+    def to_json_file(self, path: str, *, indent: int = 2) -> None:
+        export_to_json_file(self.build(), path, indent=indent)
 
     def to_env(self) -> None:
-        export_to_env(self._chain.resolve())
+        from envchain.exporter import export_to_env
+        export_to_env(self.build())
 
-    def to_json_file(self, path: str, indent: int = 2) -> None:
-        export_to_json_file(self._chain.resolve(), path, indent=indent)
+    # ------------------------------------------------------------------
+    # Chain access
+    # ------------------------------------------------------------------
+
+    def get(self, key: str, default: Any = None) -> Any:
+        return self._chain.get(key, default)
+
+    def __repr__(self) -> str:  # pragma: no cover
+        return f"EnvChainBuilder(layers={len(self._chain._layers)})"
