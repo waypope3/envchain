@@ -1,6 +1,6 @@
-"""Fluent builder for constructing layered EnvChain instances."""
+"""EnvChainBuilder: fluent interface for assembling and exporting env chains."""
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 from envchain.chain import EnvChain
 from envchain.loader import load_from_env, load_from_json_file, load_from_dotenv
@@ -12,96 +12,88 @@ from envchain.exporter import (
     export_to_json_file,
 )
 from envchain.scoper import scope_env
-from envchain.comparator import compare_envs
-from envchain.grouper import (
-    group_by_prefix,
-    group_by_mapping,
-    group_by_predicate,
-)
-from typing import Callable
+from envchain.aliaser import apply_aliases
 
 
 class EnvChainBuilder:
-    """Fluent builder that accumulates layers and resolves them via EnvChain."""
+    """Fluent builder for constructing an EnvChain from multiple sources."""
 
     def __init__(self) -> None:
-        self._chain: EnvChain = EnvChain()
+        self._chain = EnvChain()
 
     # ------------------------------------------------------------------
-    # Layer additions
+    # Layer addition
     # ------------------------------------------------------------------
 
-    def add_env(self, prefix: Optional[str] = None) -> "EnvChainBuilder":
-        """Add a layer sourced from the current process environment."""
-        self._chain.add_layer(load_from_env(prefix=prefix))
-        return self
-
-    def add_dotenv(self, path: str, prefix: Optional[str] = None) -> "EnvChainBuilder":
-        """Add a layer sourced from a .env file."""
-        data = load_from_dotenv(path)
-        if prefix:
-            data = {k: v for k, v in data.items() if k.startswith(prefix)}
+    def add_layer(self, data: Dict[str, Any]) -> "EnvChainBuilder":
+        """Add a plain dict as a layer."""
         self._chain.add_layer(data)
         return self
 
-    def add_json(self, path: str) -> "EnvChainBuilder":
-        """Add a layer sourced from a JSON file."""
-        self._chain.add_layer(load_from_json_file(path))
+    def add_env(self, prefix: Optional[str] = None) -> "EnvChainBuilder":
+        """Add current process environment (optionally filtered by prefix)."""
+        self._chain.add_layer(load_from_env(prefix=prefix))
         return self
 
-    def add_dict(self, data: Dict[str, str]) -> "EnvChainBuilder":
-        """Add an explicit dict as a layer."""
-        self._chain.add_layer(dict(data))
+    def add_dotenv(
+        self, path: str, prefix: Optional[str] = None
+    ) -> "EnvChainBuilder":
+        """Add variables from a .env file."""
+        self._chain.add_layer(load_from_dotenv(path, prefix=prefix))
         return self
 
-    def add_scoped(self, env: Dict[str, str], scope: str) -> "EnvChainBuilder":
-        """Add a layer where all keys are prefixed with *scope*."""
-        self._chain.add_layer(scope_env(env, scope))
+    def add_json(
+        self, path: str, prefix: Optional[str] = None
+    ) -> "EnvChainBuilder":
+        """Add variables from a JSON file."""
+        self._chain.add_layer(load_from_json_file(path, prefix=prefix))
+        return self
+
+    def add_scoped(
+        self, data: Dict[str, Any], scope: str
+    ) -> "EnvChainBuilder":
+        """Add a dict as a layer, prefixing all keys with *scope*."""
+        self._chain.add_layer(scope_env(data, scope))
+        return self
+
+    def add_aliased(
+        self,
+        data: Dict[str, Any],
+        aliases: Dict[str, str],
+        *,
+        keep_original: bool = True,
+        missing_ok: bool = False,
+    ) -> "EnvChainBuilder":
+        """Add a dict layer after applying key aliases."""
+        aliased = apply_aliases(
+            data, aliases, keep_original=keep_original, missing_ok=missing_ok
+        )
+        self._chain.add_layer(aliased)
         return self
 
     # ------------------------------------------------------------------
-    # Resolution
+    # Build
     # ------------------------------------------------------------------
 
-    def build(self) -> Dict[str, str]:
-        """Resolve all layers and return the merged dict."""
-        return self._chain.resolve()
+    def build(self) -> EnvChain:
+        """Return the underlying EnvChain instance."""
+        return self._chain
 
     # ------------------------------------------------------------------
     # Export shortcuts
     # ------------------------------------------------------------------
 
-    def to_dict(self) -> Dict[str, str]:
-        return export_to_dict(self.build())
+    def to_dict(self) -> Dict[str, Any]:
+        return export_to_dict(self._chain.resolve())
 
     def to_json(self, indent: int = 2) -> str:
-        return export_to_json(self.build(), indent=indent)
+        return export_to_json(self._chain.resolve(), indent=indent)
 
     def to_dotenv(self) -> str:
-        return export_to_dotenv(self.build())
+        return export_to_dotenv(self._chain.resolve())
 
-    def to_env_commands(self) -> List[str]:
-        return export_to_env(self.build())
+    def to_env(self) -> None:
+        export_to_env(self._chain.resolve())
 
     def to_json_file(self, path: str, indent: int = 2) -> None:
-        export_to_json_file(self.build(), path, indent=indent)
-
-    # ------------------------------------------------------------------
-    # Comparison shortcut
-    # ------------------------------------------------------------------
-
-    def compare_with(self, other: "EnvChainBuilder"):
-        return compare_envs(self.build(), other.build())
-
-    # ------------------------------------------------------------------
-    # Grouping shortcuts
-    # ------------------------------------------------------------------
-
-    def group_by_prefix(self, separator: str = "_", lowercase_groups: bool = False):
-        return group_by_prefix(self.build(), separator=separator, lowercase_groups=lowercase_groups)
-
-    def group_by_mapping(self, mapping: Dict[str, List[str]], include_unmatched: bool = False):
-        return group_by_mapping(self.build(), mapping, include_unmatched=include_unmatched)
-
-    def group_by_predicate(self, predicates: Dict[str, Callable], include_unmatched: bool = False):
-        return group_by_predicate(self.build(), predicates, include_unmatched=include_unmatched)
+        export_to_json_file(self._chain.resolve(), path, indent=indent)
